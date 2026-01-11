@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   FileImage,
@@ -31,6 +31,16 @@ export default function Page() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [penColor, setPenColor] = useState("#2563eb");
+  const [penSize, setPenSize] = useState(3);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const historyRef = useRef<ImageData[]>([]);
+  const redoRef = useRef<ImageData[]>([]);
 
   useEffect(() => {
     if (!file) {
@@ -99,6 +109,131 @@ export default function Page() {
       setStatus("preview");
     }
   };
+
+  const syncCanvasSize = () => {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img) return;
+    const { width, height } = img.getBoundingClientRect();
+    const nextWidth = Math.max(1, Math.floor(width));
+    const nextHeight = Math.max(1, Math.floor(height));
+    if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+      canvas.width = nextWidth;
+      canvas.height = nextHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.lineWidth = penSize;
+    }
+  };
+
+  const getCanvasPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * (canvas.width / rect.width),
+      y: (event.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const handlePointerDown = (
+    event: React.PointerEvent<HTMLCanvasElement>,
+  ) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(event.pointerId);
+    isDrawingRef.current = true;
+    lastPointRef.current = getCanvasPoint(event);
+  };
+
+  const handlePointerMove = (
+    event: React.PointerEvent<HTMLCanvasElement>,
+  ) => {
+    if (!isDrawingRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const nextPoint = getCanvasPoint(event);
+    const lastPoint = lastPointRef.current;
+    if (!lastPoint) {
+      lastPointRef.current = nextPoint;
+      return;
+    }
+    ctx.strokeStyle = penColor;
+    ctx.lineWidth = penSize;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.x, lastPoint.y);
+    ctx.lineTo(nextPoint.x, nextPoint.y);
+    ctx.stroke();
+    lastPointRef.current = nextPoint;
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) {
+      const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      historyRef.current.push(snapshot);
+      redoRef.current = [];
+      setCanUndo(historyRef.current.length > 0);
+      setCanRedo(false);
+    }
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      historyRef.current = [];
+      redoRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
+    }
+  };
+
+  const undoStroke = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || historyRef.current.length === 0) return;
+    const last = historyRef.current.pop();
+    if (last) redoRef.current.push(last);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const previous = historyRef.current.at(-1);
+    if (previous) ctx.putImageData(previous, 0, 0);
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(redoRef.current.length > 0);
+  };
+
+  const redoStroke = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || redoRef.current.length === 0) return;
+    const next = redoRef.current.pop();
+    if (!next) return;
+    historyRef.current.push(next);
+    ctx.putImageData(next, 0, 0);
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(redoRef.current.length > 0);
+  };
+
+  useEffect(() => {
+    if (!isPreviewOpen) return;
+    syncCanvasSize();
+    historyRef.current = [];
+    redoRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    const handleResize = () => syncCanvasSize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [isPreviewOpen, previewUrl]);
 
   const resetFlow = () => {
     setFile(null);
@@ -378,14 +513,94 @@ export default function Page() {
             Close
           </button>
           <div
-            className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white p-4 shadow-2xl"
+            className="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white p-4 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <img
-              src={previewUrl}
-              alt="X-ray expanded preview"
-              className="h-full w-full object-contain"
-            />
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span className="font-semibold text-slate-700">Annotate</span>
+                <span>Pen size: {penSize}px</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { color: "#2563eb", label: "Blue" },
+                  { color: "#16a34a", label: "Green" },
+                  { color: "#f97316", label: "Orange" },
+                  { color: "#dc2626", label: "Red" },
+                  { color: "#0f172a", label: "Black" },
+                ].map((swatch) => (
+                  <button
+                    key={swatch.color}
+                    type="button"
+                    aria-label={`Select ${swatch.label}`}
+                    onClick={() => setPenColor(swatch.color)}
+                    className={`h-6 w-6 rounded-full border ${
+                      penColor === swatch.color
+                        ? "border-slate-900 ring-2 ring-slate-300"
+                        : "border-slate-200"
+                    }`}
+                    style={{ backgroundColor: swatch.color }}
+                  />
+                ))}
+                <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Size
+                  </span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={8}
+                    value={penSize}
+                    onChange={(event) =>
+                      setPenSize(Number(event.target.value))
+                    }
+                    className="h-1 w-20 cursor-pointer"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={undoStroke}
+                  disabled={!canUndo}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:text-slate-300"
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={redoStroke}
+                  disabled={!canRedo}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:border-slate-300 disabled:cursor-not-allowed disabled:text-slate-300"
+                >
+                  Redo
+                </button>
+                <button
+                  type="button"
+                  onClick={clearCanvas}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:border-slate-300"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="flex justify-center">
+              <div className="relative inline-block">
+                <img
+                  ref={imgRef}
+                  src={previewUrl}
+                  alt="X-ray expanded preview"
+                  className="max-h-[70vh] max-w-[90vw] rounded-xl object-contain"
+                  onLoad={syncCanvasSize}
+                />
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0 h-full w-full rounded-xl"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerUp}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}
