@@ -30,6 +30,7 @@ export default function Page() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -224,11 +225,20 @@ export default function Page() {
 
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   {previewUrl ? (
-                    <img
-                      src={previewUrl}
-                      alt="X-ray preview"
-                      className="h-40 w-full rounded-xl object-cover"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsPreviewOpen(true)}
+                      className="group relative h-40 w-full overflow-hidden rounded-xl"
+                    >
+                      <img
+                        src={previewUrl}
+                        alt="X-ray preview"
+                        className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+                      />
+                      <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 text-xs font-semibold uppercase tracking-[0.2em] text-white opacity-0 transition group-hover:bg-slate-900/40 group-hover:opacity-100">
+                        Click to expand
+                      </span>
+                    </button>
                   ) : (
                     <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm text-slate-400">
                       Preview
@@ -352,6 +362,33 @@ export default function Page() {
           animation: fadeUp 0.5s ease-out both;
         }
       `}</style>
+
+      {isPreviewOpen && previewUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setIsPreviewOpen(false)}
+        >
+          <button
+            type="button"
+            className="absolute right-6 top-6 rounded-full bg-white/90 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-700"
+            onClick={() => setIsPreviewOpen(false)}
+          >
+            Close
+          </button>
+          <div
+            className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white p-4 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              src={previewUrl}
+              alt="X-ray expanded preview"
+              className="h-full w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }
