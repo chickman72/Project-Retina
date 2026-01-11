@@ -1,0 +1,357 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  FileImage,
+  Scan,
+  ShieldCheck,
+  UploadCloud,
+} from "lucide-react";
+
+type Status = "idle" | "preview" | "analyzing" | "result";
+
+type AnalysisResult = {
+  diagnosis: "Normal" | "Pneumonia";
+  confidence: number;
+  is_critical: boolean;
+};
+
+type CustomVisionResponse = {
+  predictions?: Array<{
+    tagName?: string;
+    probability?: number;
+  }>;
+};
+
+export default function Page() {
+  const [status, setStatus] = useState<Status>("idle");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const nextUrl = URL.createObjectURL(file);
+    setPreviewUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [file]);
+
+  const confidencePercent = useMemo(() => {
+    if (!result) return 0;
+    return Math.round(result.confidence * 100);
+  }, [result]);
+
+  const handleFile = (nextFile: File) => {
+    setFile(nextFile);
+    setResult(null);
+    setStatus("preview");
+  };
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    if (droppedFile) handleFile(droppedFile);
+  };
+
+  const analyzeImage = async () => {
+    if (!file) return;
+    setStatus("analyzing");
+    setResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Analysis failed. Please try again.");
+      }
+
+      const data = (await response.json()) as CustomVisionResponse;
+      const topPrediction = [...(data.predictions ?? [])].sort(
+        (a, b) => (b.probability ?? 0) - (a.probability ?? 0),
+      )[0];
+      const tagName = (topPrediction?.tagName ?? "Normal").toLowerCase();
+      const diagnosis = tagName.includes("pneumonia") ? "Pneumonia" : "Normal";
+      const confidence = Math.max(
+        0,
+        Math.min(1, topPrediction?.probability ?? 0),
+      );
+
+      setResult({
+        diagnosis,
+        confidence,
+        is_critical: diagnosis === "Pneumonia",
+      });
+      setStatus("result");
+    } catch (error) {
+      console.error(error);
+      setStatus("preview");
+    }
+  };
+
+  const resetFlow = () => {
+    setFile(null);
+    setResult(null);
+    setStatus("idle");
+  };
+
+  const theme =
+    result?.is_critical === true
+      ? {
+          accent: "text-red-300",
+          soft: "bg-red-500/10",
+          border: "border-red-400/30",
+          pill: "bg-red-500/15 text-red-200 border-red-500/40",
+          glow: "shadow-[0_0_40px_rgba(239,68,68,0.25)]",
+        }
+      : {
+          accent: "text-emerald-300",
+          soft: "bg-emerald-500/10",
+          border: "border-emerald-400/30",
+          pill: "bg-emerald-500/15 text-emerald-200 border-emerald-500/40",
+          glow: "shadow-[0_0_40px_rgba(16,185,129,0.25)]",
+        };
+
+  return (
+    <main
+      className="min-h-screen bg-slate-50 text-slate-900"
+      style={{
+        fontFamily:
+          '"Space Grotesk", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif',
+      }}
+    >
+      <div className="flex min-h-screen">
+        <aside className="flex w-64 shrink-0 flex-col gap-8 border-r border-slate-200 bg-white px-6 py-10">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+              Project Retina
+            </p>
+            <h2 className="mt-3 text-lg font-semibold text-slate-900">
+              Diagnostic Console
+            </h2>
+          </div>
+          <nav className="flex flex-col gap-3 text-sm">
+            {[
+              { label: "Analyze", active: true },
+              { label: "Results", active: false },
+              { label: "History", active: false },
+              { label: "Settings", active: false },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className={`rounded-xl px-4 py-2 font-medium ${
+                  item.active
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </div>
+            ))}
+          </nav>
+        </aside>
+
+        <section className="flex w-full flex-1 flex-col gap-6 px-6 py-10 sm:px-10">
+          <header className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">
+              Medical AI
+            </p>
+            <h1 className="text-3xl font-semibold text-slate-900 sm:text-4xl">
+              AI-Powered Diagnostic Imaging
+            </h1>
+            <p className="text-sm text-slate-500">
+              Upload a chest X-ray, review the preview, and run analysis.
+            </p>
+          </header>
+
+          <div className="grid gap-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900">Analyze</h2>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  {status}
+                </span>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div
+                  className={`relative flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed px-4 py-6 text-center transition ${
+                    isDragging
+                      ? "border-cyan-400 bg-cyan-50"
+                      : "border-slate-300 bg-slate-50 hover:border-cyan-300"
+                  }`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={onDrop}
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-cyan-600 shadow-sm">
+                    <UploadCloud className="h-6 w-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-base font-medium text-slate-900">
+                      Upload chest X-ray
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Drag and drop or click to browse
+                    </p>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    PNG, JPG, or DICOM
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                    onChange={(event) => {
+                      const nextFile = event.target.files?.[0];
+                      if (nextFile) handleFile(nextFile);
+                    }}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  {previewUrl ? (
+                    <img
+                      src={previewUrl}
+                      alt="X-ray preview"
+                      className="h-40 w-full rounded-xl object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-300 text-sm text-slate-400">
+                      Preview
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={analyzeImage}
+                disabled={!file || status === "analyzing"}
+                className="mt-4 w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {status === "analyzing" ? "Analyzing..." : "Analyze"}
+              </button>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900">Results</h2>
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  {status}
+                </span>
+              </div>
+
+              {status === "idle" && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                  Upload an image to view diagnostic results.
+                </div>
+              )}
+
+              {status === "preview" && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                  Preview ready. Click Analyze to run the model.
+                </div>
+              )}
+
+              {status === "analyzing" && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div className="h-3 w-3 animate-pulse rounded-full bg-cyan-500" />
+                    Analyzing image with Retina model...
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-full w-2/3 animate-pulse rounded-full bg-cyan-500" />
+                  </div>
+                </div>
+              )}
+
+              {status === "result" && result && (
+                <div
+                  className={`space-y-4 rounded-2xl border p-5 ${theme.soft} ${theme.border}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                        Diagnosis
+                      </p>
+                      <p className={`text-2xl font-semibold ${theme.accent}`}>
+                        {result.diagnosis}
+                      </p>
+                    </div>
+                    <div
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${theme.pill}`}
+                    >
+                      {result.is_critical ? (
+                        <>
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          Warning
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          Safe
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-sm text-slate-600">
+                    <div className="flex items-center justify-between">
+                      <span>Confidence</span>
+                      <span className="font-semibold text-slate-900">
+                        {confidencePercent}%
+                      </span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-full rounded-full ${
+                          result.is_critical ? "bg-red-500" : "bg-emerald-500"
+                        }`}
+                        style={{ width: `${confidencePercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={resetFlow}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300"
+                  >
+                    Analyze another image
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+      <style jsx global>{`
+        @keyframes fadeUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        main section > * {
+          animation: fadeUp 0.5s ease-out both;
+        }
+      `}</style>
+    </main>
+  );
+}
